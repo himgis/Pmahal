@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Shapefile ZIP (Admin Only)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body { 
+            font-family: Arial; 
+            background: #f3e5f5; 
+            padding: 50px; 
+            text-align: center; 
+        }
+        h1 { color: #6a1b9a; }
+        input, button { 
+            padding: 18px 40px; 
+            font-size: 20px; 
+            margin: 15px; 
+            border-radius: 12px; 
+        }
+        button { 
+            background: #9c27b0; 
+            color: white; 
+            border: none; 
+            cursor: pointer; 
+            font-weight: bold; 
+        }
+        button:hover { background: #7b1fa2; }
+        #msg { 
+            margin: 30px; 
+            font-size: 20px; 
+            font-weight: bold; 
+        }
+        #logout { 
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            font-size: 18px;
+            color: #9c27b0;
+        }
+    </style>
+</head>
+
+<body>
+
+<a id="logout" href="/logout">Logout</a>
+
+<h1>Upload Shapefile (ZIP) — Multiple Files</h1>
+
+<input type="file" id="f" accept=".zip" multiple><br>
+<button onclick="upload()">UPLOAD</button>
+
+<div id="msg"></div>
+
+<hr>
+<a href="/" style="font-size:20px;color:#9c27b0">Back to Map</a>
+
+<script>
+// ---------- Admin Authentication Check ----------
+fetch("/is_admin")
+    .then(res => res.json())
+    .then(data => {
+        if (!data.admin) {
+            alert("You must log in as admin to access this page!");
+            window.location.href = "/login";
+        }
+    });
+
+// ---------- Upload Function ----------
+async function upload() {
+    const files = document.getElementById('f').files;
+    if (!files.length) {
+        alert("Please select at least one ZIP file");
+        return;
+    }
+
+    const fd = new FormData();
+    for (let i = 0; i < files.length; i++) {
+        fd.append("files", files[i]);
+    }
+
+    document.getElementById("msg").innerHTML = "<span style='color:blue'>Uploading...</span>";
+
+    const res = await fetch("/upload", { method: "POST", body: fd });
+    const data = await res.json();
+
+    if (res.ok) {
+        let html = "<span style='color:green'>Uploaded Layers:</span><br><br>";
+        data.uploaded.forEach(name => html += "✔ <b>" + name + "</b><br>");
+
+        if (data.failed.length > 0) {
+            html += "<br><span style='color:red'>Failed Files:</span><br>";
+            data.failed.forEach(f => html += "✘ " + f + "<br>");
+        }
+
+        document.getElementById("msg").innerHTML = html;
+    } else {
+        document.getElementById("msg").innerHTML =
+            "<span style='color:red'>ERROR: " + data.error + "</span>";
+    }
+}
+</script>
+
+</body>
+</html>
