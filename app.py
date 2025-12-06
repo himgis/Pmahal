@@ -26,7 +26,7 @@ layers = {}  # Stores all layers: name → {geojson, color, opacity, zip_path}
 # -----------------------------------------
 # LAYER DISPLAY ORDER (TOP → BOTTOM)
 # -----------------------------------------
-LAYER_ORDER = ["Taluka", "P_Location"]   # You can change the order
+LAYER_ORDER = ["P_Location","Taluka"]   # You can change the order
 
 # -----------------------------------------
 # GITHUB SHAPEFILES (raw URLs)
