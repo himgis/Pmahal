@@ -1,0 +1,9 @@
+Flask
+Flask-Cors
+geopandas
+shapely
+fiona
+pyproj
+rtree
+gunicorn
+requests
