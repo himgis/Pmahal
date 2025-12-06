@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login</title>
+    <style>
+        body { font-family: Arial; background:#e3f2fd; text-align:center; padding:80px; }
+        input, button { padding:14px; margin:10px; width:260px; font-size:18px; }
+        button { background:#1565c0; color:white; border:none; cursor:pointer; }
+        button:hover { background:#0d47a1; }
+    </style>
+</head>
+<body>
+
+<h2>Admin Login</h2>
+
+<input id="u" placeholder="Username"><br>
+<input id="p" placeholder="Password" type="password"><br>
+<button onclick="login()">Login</button>
+
+<p id="msg" style="color:red;font-weight:bold"></p>
+
+<script>
+async function login() {
+    const res = await fetch("/login", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            username: document.getElementById("u").value,
+            password: document.getElementById("p").value
+        })
+    });
+
+    const data = await res.json();
+
+    if (res.ok) {
+        localStorage.setItem("isAdmin","true");
+        window.location.href = "/";
+    } else {
+        document.getElementById("msg").innerText = "Invalid login!";
+    }
+}
+</script>
+
+</body>
+</html>
