@@ -27,8 +27,8 @@ layers = {}  # Stores all layers: name → {geojson, color, opacity, zip_path}
 # GITHUB SHAPEFILES (raw URLs)
 # -----------------------------------------
 GITHUB_SHAPEFILES = {
-    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip",
-    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip"
+    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip",
+    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
 }
 # -----------------------------------------
 # LOGIN PAGE
