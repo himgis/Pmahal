@@ -124,9 +124,9 @@ L.control.locate({
 function logout() { fetch("/logout").then(() => location.reload()); }
 
 let firstLoad = true;
-let previousLayerNames = [];
-let allLayers = {};
-let layerVisibility = {};
+let allLayers = {};      // name -> L.GeoJSON
+let layerOrder = [];     // array of layer names in desired order (top to bottom or bottom-to-top depending how you add)
+let layerVisibility = {}; // name -> boolean
 let isAdmin = false;
 
 const styleConfig = { weight: 3, fillOpacity: 0.05, radius: 8 };
@@ -156,22 +156,6 @@ function applyGlobalStyle() {
     };
 });
 
-function deleteLayer(name) {
-    if (!confirm(`Delete layer "${name}"?`)) return;
-    fetch(`/delete/${encodeURIComponent(name)}`, { method: 'DELETE' })
-        .then(res => res.json())
-        .then(data => {
-            if (data.message) {
-                if (allLayers[name]) map.removeLayer(allLayers[name]);
-                delete allLayers[name];
-                delete layerVisibility[name];
-                loadLayers();
-            } else {
-                alert(data.error || "Failed to delete");
-            }
-        });
-}
-
 async function loadLayers() {
     try {
         const res = await fetch('/layers');
@@ -180,27 +164,30 @@ async function loadLayers() {
         isAdmin = data.is_admin;
         document.getElementById("adminMenu").style.display = isAdmin ? "block" : "none";
 
-        const currentNames = Object.keys(data.layers);
-        const newLayers = currentNames.filter(x => !previousLayerNames.includes(x));
+        // server order (explicit)
+        const serverOrder = Array.isArray(data.order) ? data.order.slice() : Object.keys(data.layers);
 
-        Object.keys(allLayers).forEach(name => {
-            if (!currentNames.includes(name)) {
-                map.removeLayer(allLayers[name]);
-                delete allLayers[name];
-                delete layerVisibility[name];
-            }
-        });
+        // update layerOrder: keep server order, append any new ones
+        // if there is a saved server order it will be used as source of truth
+        layerOrder = serverOrder.slice();
+        for (const name of Object.keys(data.layers)) {
+            if (!layerOrder.includes(name)) layerOrder.push(name);
+        }
 
+        // remove layers that disappeared
+        layerOrder = layerOrder.filter(n => Object.keys(data.layers).includes(n));
+
+        // ensure allLayers contains created Leaflet layers
         for (const [name, info] of Object.entries(data.layers)) {
-            const geojson = info.geojson;
-            const color = info.color;
-
-            geojson.features.forEach(f => {
-                if (!f.properties) f.properties = {};
-                f.properties._color = color;
-            });
-
             if (!allLayers[name]) {
+                const geojson = info.geojson;
+                const color = info.color;
+
+                geojson.features.forEach(f => {
+                    if (!f.properties) f.properties = {};
+                    f.properties._color = color;
+                });
+
                 const layer = L.geoJSON(geojson, {
                     style: () => ({ color, weight: styleConfig.weight, fillColor: color, fillOpacity: styleConfig.fillOpacity }),
                     pointToLayer: (f, latlng) =>
@@ -216,44 +203,54 @@ async function loadLayers() {
                     }
                 });
 
-                if (layerVisibility[name] !== false) {
-                    layer.addTo(map);
-                    layerVisibility[name] = true;
-                }
-
                 allLayers[name] = layer;
+                // default visibility true unless explicitly set false
+                if (layerVisibility[name] === undefined) layerVisibility[name] = true;
             }
         }
 
-        updateLayerCheckboxes(currentNames);
+        renderLayersOnMap();
+        updateLayerCheckboxUI();
 
-        if ((firstLoad || newLayers.length > 0) && Object.keys(allLayers).length > 0) {
+        // fit bounds on first load or when layers added
+        if ((firstLoad) && Object.values(allLayers).length > 0) {
             const b = L.latLngBounds([]);
             Object.values(allLayers).forEach(l => { try { b.extend(l.getBounds()); } catch {} });
             if (b.isValid()) map.fitBounds(b);
         }
 
         firstLoad = false;
-        previousLayerNames = currentNames;
-
     } catch (e) {
         console.error("Error loading layers:", e);
     }
 }
 
-/* ============================================
-   UPDATED WITH MOVE UP / MOVE DOWN BUTTONS
-   ============================================ */
-function updateLayerCheckboxes(names) {
+function renderLayersOnMap() {
+    // remove existing GeoJSON layers
+    map.eachLayer(l => {
+        if (l instanceof L.GeoJSON) map.removeLayer(l);
+    });
+
+    // add in the order of layerOrder
+    layerOrder.forEach(name => {
+        const lyr = allLayers[name];
+        if (!lyr) return;
+        if (layerVisibility[name] !== false) {
+            map.addLayer(lyr);
+        }
+    });
+}
+
+function updateLayerCheckboxUI() {
     const div = document.getElementById("layerList");
     div.innerHTML = "";
 
-    if (names.length === 0) {
+    if (layerOrder.length === 0) {
         div.innerHTML = "<em>No layers</em>";
         return;
     }
 
-    names.forEach((name, index) => {
+    layerOrder.forEach((name, index) => {
         const visible = layerVisibility[name] !== false;
 
         const row = document.createElement("div");
@@ -265,7 +262,7 @@ function updateLayerCheckboxes(names) {
         cb.checked = visible;
         cb.onchange = () => {
             layerVisibility[name] = cb.checked;
-            cb.checked ? map.addLayer(allLayers[name]) : map.removeLayer(allLayers[name]);
+            renderLayersOnMap();
         };
 
         const label = document.createElement("label");
@@ -306,33 +303,59 @@ function updateLayerCheckboxes(names) {
     });
 }
 
-/* ============================================
-   MOVE LAYER UP / DOWN
-   ============================================ */
-function moveLayer(name, direction) {
-    const names = Object.keys(allLayers);
-    let index = names.indexOf(name);
-    let newIndex = index + direction;
-
-    if (newIndex < 0 || newIndex >= names.length) return;
-
-    [names[index], names[newIndex]] = [names[newIndex], names[index]];
-
-    const reordered = {};
-    names.forEach(n => reordered[n] = allLayers[n]);
-    allLayers = reordered;
-
-    map.eachLayer(l => {
-        if (l instanceof L.GeoJSON) map.removeLayer(l);
-    });
-
-    names.forEach(n => {
-        if (layerVisibility[n] !== false) map.addLayer(allLayers[n]);
-    });
-
-    updateLayerCheckboxes(names);
+async function deleteLayer(name) {
+    if (!confirm(`Delete layer "${name}"?`)) return;
+    try {
+        const res = await fetch(`/delete/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.message) {
+            if (allLayers[name]) {
+                try { map.removeLayer(allLayers[name]); } catch {}
+                delete allLayers[name];
+            }
+            // remove from order and save to server if admin
+            layerOrder = layerOrder.filter(n => n !== name);
+            if (isAdmin) await saveOrderToServer();
+            renderLayersOnMap();
+            updateLayerCheckboxUI();
+        } else {
+            alert(data.error || "Failed to delete");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Failed to delete layer");
+    }
 }
 
+async function moveLayer(name, direction) {
+    const idx = layerOrder.indexOf(name);
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= layerOrder.length) return;
+
+    [layerOrder[idx], layerOrder[newIdx]] = [layerOrder[newIdx], layerOrder[idx]];
+
+    renderLayersOnMap();
+    updateLayerCheckboxUI();
+
+    // persist order to server (admin only)
+    if (isAdmin) {
+        await saveOrderToServer();
+    }
+}
+
+async function saveOrderToServer() {
+    try {
+        await fetch('/set_order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: layerOrder })
+        });
+    } catch (e) {
+        console.error("Failed to save order:", e);
+    }
+}
+
+// auto-refresh layers but preserve order
 loadLayers();
 setInterval(loadLayers, 3000);
 </script>
