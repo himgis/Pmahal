@@ -4,6 +4,7 @@ import zipfile
 import shutil
 import random
 import requests
+import json
 from flask import Flask, request, jsonify, render_template, session
 from flask_cors import CORS
 import geopandas as gpd
@@ -14,6 +15,8 @@ import geopandas as gpd
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+ORDER_FILE = os.path.join(UPLOAD_FOLDER, "layer_order.json")
+
 app = Flask(__name__)
 app.secret_key = "YOUR_SECRET_KEY"  # change this
 CORS(app)
@@ -21,12 +24,12 @@ CORS(app)
 ADMIN_USER = "admin"
 ADMIN_PASS = "1234"
 
-layers = {}  # Stores all layers: name → {geojson, color, opacity, zip_path}
+layers = {}  # name -> {geojson, color, opacity, zip_path}
 
 # -----------------------------------------
-# LAYER DISPLAY ORDER (TOP → BOTTOM)
+# DEFAULT ORDER (used only if no saved file)
 # -----------------------------------------
-LAYER_ORDER = ["P_Location","Taluka"]   # You can change the order
+DEFAULT_LAYER_ORDER = ["P_Location", "Taluka"]
 
 # -----------------------------------------
 # GITHUB SHAPEFILES (raw URLs)
@@ -36,12 +39,39 @@ GITHUB_SHAPEFILES = {
     "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
 }
 
+
+# -----------------------------------------
+# Helper: load/save order file
+# -----------------------------------------
+def load_saved_order():
+    try:
+        if os.path.exists(ORDER_FILE):
+            with open(ORDER_FILE, "rt", encoding="utf8") as fh:
+                data = json.load(fh)
+                if isinstance(data, list):
+                    return data
+    except Exception as e:
+        print("Failed to read order file:", e)
+    return DEFAULT_LAYER_ORDER.copy()
+
+
+def save_order(order_list):
+    try:
+        with open(ORDER_FILE, "wt", encoding="utf8") as fh:
+            json.dump(order_list, fh, indent=2)
+        return True
+    except Exception as e:
+        print("Failed to save order file:", e)
+        return False
+
+
 # -----------------------------------------
 # LOGIN PAGE
 # -----------------------------------------
 @app.route("/login", methods=["GET"])
 def login_page():
     return render_template("login.html")
+
 
 @app.route("/login", methods=["POST"])
 def login_api():
@@ -51,6 +81,7 @@ def login_api():
         return jsonify({"message": "Logged in"})
     else:
         return jsonify({"error": "Invalid username or password"}), 401
+
 
 @app.route("/logout")
 def logout():
@@ -68,7 +99,7 @@ def index():
 
 
 # -----------------------------------------
-# UPLOAD PAGE
+# UPLOAD PAGE (ADMIN ONLY)
 # -----------------------------------------
 @app.route("/upload_page")
 def upload_page():
@@ -105,6 +136,13 @@ def upload_shapefiles():
         else:
             failed.append(file.filename)
 
+    # ensure new layers are appended to saved order (if not present)
+    order = load_saved_order()
+    for name in layers.keys():
+        if name not in order:
+            order.append(name)
+    save_order(order)
+
     return jsonify({"uploaded": uploaded, "failed": failed})
 
 
@@ -119,8 +157,19 @@ def delete_layer(layer_name):
     if layer_name in layers:
         zip_path = layers[layer_name].get("zip_path")
         if zip_path and os.path.exists(zip_path):
-            os.remove(zip_path)
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+
         layers.pop(layer_name)
+
+        # remove from saved order
+        order = load_saved_order()
+        if layer_name in order:
+            order = [n for n in order if n != layer_name]
+            save_order(order)
+
         return jsonify({"message": "Deleted"})
     else:
         return jsonify({"error": "Layer not found"}), 404
@@ -133,36 +182,76 @@ def delete_layer(layer_name):
 def get_layers():
     is_admin = session.get("admin", False)
 
-    # ------ SORT LAYERS BY PRIORITY ------
-    sorted_layer_names = sorted(
-        layers.keys(),
-        key=lambda x: (LAYER_ORDER.index(x) if x in LAYER_ORDER else 999, x)
-    )
+    # read saved order
+    saved_order = load_saved_order()
 
-    sorted_layers = {name: layers[name] for name in sorted_layer_names}
+    # ensure all present layers are included; unknown layers appended (alphabetically)
+    present = list(layers.keys())
+    ordered = []
+    for n in saved_order:
+        if n in present and n not in ordered:
+            ordered.append(n)
+    # append any missing layers
+    for n in sorted(present):
+        if n not in ordered:
+            ordered.append(n)
 
-    # ------ BOUNDS CALCULATION ------
+    # build ordered dict to return (dict preserves insertion order in Python 3.7+)
+    ordered_layers = {name: layers[name] for name in ordered}
+
+    # calculate bounds using ordered_layers
     final_bounds = None
-    if sorted_layers:
+    if ordered_layers:
         all_bounds = []
-        for lyr in sorted_layers.values():
-            gdf = gpd.GeoDataFrame.from_features(
-                lyr["geojson"]["features"], crs="EPSG:4326"
-            )
-            all_bounds.append(gdf.total_bounds)
+        for lyr in ordered_layers.values():
+            try:
+                gdf = gpd.GeoDataFrame.from_features(lyr["geojson"]["features"], crs="EPSG:4326")
+                all_bounds.append(gdf.total_bounds)
+            except Exception:
+                pass
 
-        minx = min(b[0] for b in all_bounds)
-        miny = min(b[1] for b in all_bounds)
-        maxx = max(b[2] for b in all_bounds)
-        maxy = max(b[3] for b in all_bounds)
-
-        final_bounds = [[miny, minx], [maxy, maxx]]
+        if all_bounds:
+            minx = min(b[0] for b in all_bounds)
+            miny = min(b[1] for b in all_bounds)
+            maxx = max(b[2] for b in all_bounds)
+            maxy = max(b[3] for b in all_bounds)
+            final_bounds = [[miny, minx], [maxy, maxx]]
 
     return jsonify({
         "is_admin": is_admin,
-        "layers": sorted_layers,
+        "layers": ordered_layers,
+        "order": ordered,   # also return the order array explicitly
         "bounds": final_bounds
     })
+
+
+# -----------------------------------------
+# SET ORDER (ADMIN ONLY) - persisting order to disk
+# -----------------------------------------
+@app.route("/set_order", methods=["POST"])
+def set_order():
+    if not session.get("admin"):
+        return jsonify({"error": "Only admin can set order"}), 403
+
+    data = request.get_json() or {}
+    new_order = data.get("order", [])
+
+    if not isinstance(new_order, list):
+        return jsonify({"error": "Order must be a list"}), 400
+
+    # sanitize: only keep layer names that currently exist; append missing existing ones afterwards
+    present = list(layers.keys())
+    cleaned = [n for n in new_order if isinstance(n, str) and n in present]
+
+    for n in present:
+        if n not in cleaned:
+            cleaned.append(n)
+
+    ok = save_order(cleaned)
+    if ok:
+        return jsonify({"message": "Order saved", "order": cleaned})
+    else:
+        return jsonify({"error": "Failed to save order"}), 500
 
 
 # -----------------------------------------
@@ -206,7 +295,7 @@ def load_zip_into_layers(zip_path):
 
 
 # -----------------------------------------
-# LOAD SHAPEFILES FROM GITHUB
+# LOAD SHAPEFILES FROM GITHUB (on startup)
 # -----------------------------------------
 def load_github_shapefiles():
     for layer_name, url in GITHUB_SHAPEFILES.items():
@@ -224,6 +313,13 @@ def load_github_shapefiles():
         load_zip_into_layers(zip_path)
 
 load_github_shapefiles()
+
+# Ensure saved order file contains current layers (append any new)
+order_now = load_saved_order()
+for n in layers.keys():
+    if n not in order_now:
+        order_now.append(n)
+save_order(order_now)
 
 
 # -----------------------------------------
