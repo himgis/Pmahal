@@ -24,12 +24,18 @@ ADMIN_PASS = "1234"
 layers = {}  # Stores all layers: name → {geojson, color, opacity, zip_path}
 
 # -----------------------------------------
+# LAYER DISPLAY ORDER (TOP → BOTTOM)
+# -----------------------------------------
+LAYER_ORDER = ["Taluka", "P_Location"]   # You can change the order
+
+# -----------------------------------------
 # GITHUB SHAPEFILES (raw URLs)
 # -----------------------------------------
 GITHUB_SHAPEFILES = {
     "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip",
     "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
 }
+
 # -----------------------------------------
 # LOGIN PAGE
 # -----------------------------------------
@@ -51,6 +57,7 @@ def logout():
     session.pop("admin", None)
     return jsonify({"message": "Logged out"})
 
+
 # -----------------------------------------
 # HOME PAGE (MAP)
 # -----------------------------------------
@@ -59,14 +66,16 @@ def index():
     is_admin = session.get("admin", False)
     return render_template("map.html", is_admin=is_admin)
 
+
 # -----------------------------------------
-# UPLOAD PAGE (ADMIN ONLY)
+# UPLOAD PAGE
 # -----------------------------------------
 @app.route("/upload_page")
 def upload_page():
     if not session.get("admin"):
         return "Unauthorized", 403
     return render_template("upload_page.html")
+
 
 # -----------------------------------------
 # UPLOAD SHAPEFILES
@@ -98,6 +107,7 @@ def upload_shapefiles():
 
     return jsonify({"uploaded": uploaded, "failed": failed})
 
+
 # -----------------------------------------
 # DELETE LAYER
 # -----------------------------------------
@@ -115,18 +125,30 @@ def delete_layer(layer_name):
     else:
         return jsonify({"error": "Layer not found"}), 404
 
+
 # -----------------------------------------
-# SEND LAYER INFO TO FRONTEND
+# SEND LAYERS WITH ORDER
 # -----------------------------------------
 @app.route("/layers")
 def get_layers():
     is_admin = session.get("admin", False)
 
+    # ------ SORT LAYERS BY PRIORITY ------
+    sorted_layer_names = sorted(
+        layers.keys(),
+        key=lambda x: (LAYER_ORDER.index(x) if x in LAYER_ORDER else 999, x)
+    )
+
+    sorted_layers = {name: layers[name] for name in sorted_layer_names}
+
+    # ------ BOUNDS CALCULATION ------
     final_bounds = None
-    if layers:
+    if sorted_layers:
         all_bounds = []
-        for lyr in layers.values():
-            gdf = gpd.GeoDataFrame.from_features(lyr["geojson"]["features"], crs="EPSG:4326")
+        for lyr in sorted_layers.values():
+            gdf = gpd.GeoDataFrame.from_features(
+                lyr["geojson"]["features"], crs="EPSG:4326"
+            )
             all_bounds.append(gdf.total_bounds)
 
         minx = min(b[0] for b in all_bounds)
@@ -138,12 +160,13 @@ def get_layers():
 
     return jsonify({
         "is_admin": is_admin,
-        "layers": layers,
+        "layers": sorted_layers,
         "bounds": final_bounds
     })
 
+
 # -----------------------------------------
-# HELPER FUNCTION: LOAD ZIP INTO LAYERS
+# HELPER: LOAD ZIP INTO LAYERS
 # -----------------------------------------
 def load_zip_into_layers(zip_path):
     temp_dir = tempfile.mkdtemp()
@@ -181,8 +204,9 @@ def load_zip_into_layers(zip_path):
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+
 # -----------------------------------------
-# LOAD SHAPEFILES FROM GITHUB ON STARTUP
+# LOAD SHAPEFILES FROM GITHUB
 # -----------------------------------------
 def load_github_shapefiles():
     for layer_name, url in GITHUB_SHAPEFILES.items():
@@ -200,6 +224,7 @@ def load_github_shapefiles():
         load_zip_into_layers(zip_path)
 
 load_github_shapefiles()
+
 
 # -----------------------------------------
 # RUN SERVER
