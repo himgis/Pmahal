@@ -124,9 +124,9 @@ L.control.locate({
 function logout() { fetch("/logout").then(() => location.reload()); }
 
 let firstLoad = true;
-let allLayers = {};      // name -> L.GeoJSON
-let layerOrder = [];     // array of layer names in desired order (top to bottom or bottom-to-top depending how you add)
-let layerVisibility = {}; // name -> boolean
+let allLayers = {};
+let layerOrder = [];
+let layerVisibility = {};
 let isAdmin = false;
 
 const styleConfig = { weight: 3, fillOpacity: 0.05, radius: 8 };
@@ -164,20 +164,15 @@ async function loadLayers() {
         isAdmin = data.is_admin;
         document.getElementById("adminMenu").style.display = isAdmin ? "block" : "none";
 
-        // server order (explicit)
         const serverOrder = Array.isArray(data.order) ? data.order.slice() : Object.keys(data.layers);
 
-        // update layerOrder: keep server order, append any new ones
-        // if there is a saved server order it will be used as source of truth
         layerOrder = serverOrder.slice();
         for (const name of Object.keys(data.layers)) {
             if (!layerOrder.includes(name)) layerOrder.push(name);
         }
 
-        // remove layers that disappeared
         layerOrder = layerOrder.filter(n => Object.keys(data.layers).includes(n));
 
-        // ensure allLayers contains created Leaflet layers
         for (const [name, info] of Object.entries(data.layers)) {
             if (!allLayers[name]) {
                 const geojson = info.geojson;
@@ -204,7 +199,6 @@ async function loadLayers() {
                 });
 
                 allLayers[name] = layer;
-                // default visibility true unless explicitly set false
                 if (layerVisibility[name] === undefined) layerVisibility[name] = true;
             }
         }
@@ -212,7 +206,6 @@ async function loadLayers() {
         renderLayersOnMap();
         updateLayerCheckboxUI();
 
-        // fit bounds on first load or when layers added
         if ((firstLoad) && Object.values(allLayers).length > 0) {
             const b = L.latLngBounds([]);
             Object.values(allLayers).forEach(l => { try { b.extend(l.getBounds()); } catch {} });
@@ -226,17 +219,17 @@ async function loadLayers() {
 }
 
 function renderLayersOnMap() {
-    // remove existing GeoJSON layers
-    map.eachLayer(l => {
-        if (l instanceof L.GeoJSON) map.removeLayer(l);
-    });
-
-    // add in the order of layerOrder
+    // FIXED: Do NOT remove layers. Only toggle visibility.
     layerOrder.forEach(name => {
-        const lyr = allLayers[name];
-        if (!lyr) return;
-        if (layerVisibility[name] !== false) {
-            map.addLayer(lyr);
+        const layer = allLayers[name];
+        if (!layer) return;
+
+        const show = layerVisibility[name] !== false;
+
+        if (show) {
+            if (!map.hasLayer(layer)) map.addLayer(layer);
+        } else {
+            if (map.hasLayer(layer)) map.removeLayer(layer);
         }
     });
 }
@@ -313,8 +306,9 @@ async function deleteLayer(name) {
                 try { map.removeLayer(allLayers[name]); } catch {}
                 delete allLayers[name];
             }
-            // remove from order and save to server if admin
+
             layerOrder = layerOrder.filter(n => n !== name);
+
             if (isAdmin) await saveOrderToServer();
             renderLayersOnMap();
             updateLayerCheckboxUI();
@@ -337,7 +331,6 @@ async function moveLayer(name, direction) {
     renderLayersOnMap();
     updateLayerCheckboxUI();
 
-    // persist order to server (admin only)
     if (isAdmin) {
         await saveOrderToServer();
     }
@@ -355,7 +348,7 @@ async function saveOrderToServer() {
     }
 }
 
-// auto-refresh layers but preserve order
+// auto-refresh
 loadLayers();
 setInterval(loadLayers, 3000);
 </script>
