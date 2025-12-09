@@ -17,6 +17,19 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ORDER_FILE = os.path.join(UPLOAD_FOLDER, "layer_order.json")
 
+# -----------------------------------------
+# Ensure layer_order.json exists (Render free-plan fix)
+# -----------------------------------------
+DEFAULT_LAYER_ORDER = ["P_Location", "Taluka"]
+
+if not os.path.exists(ORDER_FILE):
+    try:
+        with open(ORDER_FILE, "w", encoding="utf8") as f:
+            json.dump(DEFAULT_LAYER_ORDER, f, indent=2)
+        print("Created missing layer_order.json")
+    except Exception as e:
+        print("Could not create layer_order.json:", e)
+
 app = Flask(__name__)
 app.secret_key = "YOUR_SECRET_KEY"  # change this
 CORS(app)
@@ -25,19 +38,6 @@ ADMIN_USER = "admin"
 ADMIN_PASS = "1234"
 
 layers = {}  # name -> {geojson, color, opacity, zip_path}
-
-# -----------------------------------------
-# DEFAULT ORDER (used only if no saved file)
-# -----------------------------------------
-DEFAULT_LAYER_ORDER = ["P_Location", "Taluka"]
-
-# -----------------------------------------
-# GITHUB SHAPEFILES (raw URLs)
-# -----------------------------------------
-GITHUB_SHAPEFILES = {
-    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip",
-    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
-}
 
 
 # -----------------------------------------
@@ -136,7 +136,6 @@ def upload_shapefiles():
         else:
             failed.append(file.filename)
 
-    # ensure new layers are appended to saved order (if not present)
     order = load_saved_order()
     for name in layers.keys():
         if name not in order:
@@ -164,7 +163,6 @@ def delete_layer(layer_name):
 
         layers.pop(layer_name)
 
-        # remove from saved order
         order = load_saved_order()
         if layer_name in order:
             order = [n for n in order if n != layer_name]
@@ -182,24 +180,20 @@ def delete_layer(layer_name):
 def get_layers():
     is_admin = session.get("admin", False)
 
-    # read saved order
     saved_order = load_saved_order()
 
-    # ensure all present layers are included; unknown layers appended (alphabetically)
     present = list(layers.keys())
     ordered = []
     for n in saved_order:
         if n in present and n not in ordered:
             ordered.append(n)
-    # append any missing layers
+
     for n in sorted(present):
         if n not in ordered:
             ordered.append(n)
 
-    # build ordered dict to return (dict preserves insertion order in Python 3.7+)
     ordered_layers = {name: layers[name] for name in ordered}
 
-    # calculate bounds using ordered_layers
     final_bounds = None
     if ordered_layers:
         all_bounds = []
@@ -220,13 +214,13 @@ def get_layers():
     return jsonify({
         "is_admin": is_admin,
         "layers": ordered_layers,
-        "order": ordered,   # also return the order array explicitly
+        "order": ordered,
         "bounds": final_bounds
     })
 
 
 # -----------------------------------------
-# SET ORDER (ADMIN ONLY) - persisting order to disk
+# SET ORDER
 # -----------------------------------------
 @app.route("/set_order", methods=["POST"])
 def set_order():
@@ -239,7 +233,6 @@ def set_order():
     if not isinstance(new_order, list):
         return jsonify({"error": "Order must be a list"}), 400
 
-    # sanitize: only keep layer names that currently exist; append missing existing ones afterwards
     present = list(layers.keys())
     cleaned = [n for n in new_order if isinstance(n, str) and n in present]
 
@@ -297,6 +290,11 @@ def load_zip_into_layers(zip_path):
 # -----------------------------------------
 # LOAD SHAPEFILES FROM GITHUB (on startup)
 # -----------------------------------------
+GITHUB_SHAPEFILES = {
+    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip",
+    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
+}
+
 def load_github_shapefiles():
     for layer_name, url in GITHUB_SHAPEFILES.items():
         zip_path = os.path.join(UPLOAD_FOLDER, f"{layer_name}.zip")
@@ -314,7 +312,6 @@ def load_github_shapefiles():
 
 load_github_shapefiles()
 
-# Ensure saved order file contains current layers (append any new)
 order_now = load_saved_order()
 for n in layers.keys():
     if n not in order_now:
