@@ -15,7 +15,12 @@ import geopandas as gpd
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-ORDER_FILE = os.path.join(UPLOAD_FOLDER, "layer_order.json")
+# NEW permanent folder for order file
+DATA_FOLDER = "data"
+os.makedirs(DATA_FOLDER, exist_ok=True)
+
+# UPDATED: save order file in data/, NOT uploads/
+ORDER_FILE = os.path.join(DATA_FOLDER, "layer_order.json")
 
 app = Flask(__name__)
 app.secret_key = "YOUR_SECRET_KEY"  # change this
@@ -35,10 +40,9 @@ DEFAULT_LAYER_ORDER = ["P_Location", "Taluka"]
 # GITHUB SHAPEFILES (raw URLs)
 # -----------------------------------------
 GITHUB_SHAPEFILES = {
-    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip",
-    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
+    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/MyTaluka.zip",
+    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/MYP_Location.zip"
 }
-
 
 # -----------------------------------------
 # Helper: load/save order file
@@ -54,7 +58,6 @@ def load_saved_order():
         print("Failed to read order file:", e)
     return DEFAULT_LAYER_ORDER.copy()
 
-
 def save_order(order_list):
     try:
         with open(ORDER_FILE, "wt", encoding="utf8") as fh:
@@ -64,14 +67,12 @@ def save_order(order_list):
         print("Failed to save order file:", e)
         return False
 
-
 # -----------------------------------------
 # LOGIN PAGE
 # -----------------------------------------
 @app.route("/login", methods=["GET"])
 def login_page():
     return render_template("login.html")
-
 
 @app.route("/login", methods=["POST"])
 def login_api():
@@ -82,12 +83,10 @@ def login_api():
     else:
         return jsonify({"error": "Invalid username or password"}), 401
 
-
 @app.route("/logout")
 def logout():
     session.pop("admin", None)
     return jsonify({"message": "Logged out"})
-
 
 # -----------------------------------------
 # HOME PAGE (MAP)
@@ -97,7 +96,6 @@ def index():
     is_admin = session.get("admin", False)
     return render_template("map.html", is_admin=is_admin)
 
-
 # -----------------------------------------
 # UPLOAD PAGE (ADMIN ONLY)
 # -----------------------------------------
@@ -106,7 +104,6 @@ def upload_page():
     if not session.get("admin"):
         return "Unauthorized", 403
     return render_template("upload_page.html")
-
 
 # -----------------------------------------
 # UPLOAD SHAPEFILES
@@ -145,7 +142,6 @@ def upload_shapefiles():
 
     return jsonify({"uploaded": uploaded, "failed": failed})
 
-
 # -----------------------------------------
 # DELETE LAYER
 # -----------------------------------------
@@ -174,7 +170,6 @@ def delete_layer(layer_name):
     else:
         return jsonify({"error": "Layer not found"}), 404
 
-
 # -----------------------------------------
 # SEND LAYERS WITH ORDER
 # -----------------------------------------
@@ -182,24 +177,19 @@ def delete_layer(layer_name):
 def get_layers():
     is_admin = session.get("admin", False)
 
-    # read saved order
     saved_order = load_saved_order()
 
-    # ensure all present layers are included; unknown layers appended (alphabetically)
     present = list(layers.keys())
     ordered = []
     for n in saved_order:
         if n in present and n not in ordered:
             ordered.append(n)
-    # append any missing layers
     for n in sorted(present):
         if n not in ordered:
             ordered.append(n)
 
-    # build ordered dict to return (dict preserves insertion order in Python 3.7+)
     ordered_layers = {name: layers[name] for name in ordered}
 
-    # calculate bounds using ordered_layers
     final_bounds = None
     if ordered_layers:
         all_bounds = []
@@ -220,13 +210,12 @@ def get_layers():
     return jsonify({
         "is_admin": is_admin,
         "layers": ordered_layers,
-        "order": ordered,   # also return the order array explicitly
+        "order": ordered,
         "bounds": final_bounds
     })
 
-
 # -----------------------------------------
-# SET ORDER (ADMIN ONLY) - persisting order to disk
+# SET ORDER
 # -----------------------------------------
 @app.route("/set_order", methods=["POST"])
 def set_order():
@@ -239,7 +228,6 @@ def set_order():
     if not isinstance(new_order, list):
         return jsonify({"error": "Order must be a list"}), 400
 
-    # sanitize: only keep layer names that currently exist; append missing existing ones afterwards
     present = list(layers.keys())
     cleaned = [n for n in new_order if isinstance(n, str) and n in present]
 
@@ -253,9 +241,8 @@ def set_order():
     else:
         return jsonify({"error": "Failed to save order"}), 500
 
-
 # -----------------------------------------
-# HELPER: LOAD ZIP INTO LAYERS
+# ZIP LOADING
 # -----------------------------------------
 def load_zip_into_layers(zip_path):
     temp_dir = tempfile.mkdtemp()
@@ -293,9 +280,8 @@ def load_zip_into_layers(zip_path):
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-
 # -----------------------------------------
-# LOAD SHAPEFILES FROM GITHUB (on startup)
+# GITHUB AUTO-LOAD
 # -----------------------------------------
 def load_github_shapefiles():
     for layer_name, url in GITHUB_SHAPEFILES.items():
@@ -314,13 +300,11 @@ def load_github_shapefiles():
 
 load_github_shapefiles()
 
-# Ensure saved order file contains current layers (append any new)
 order_now = load_saved_order()
 for n in layers.keys():
     if n not in order_now:
         order_now.append(n)
 save_order(order_now)
-
 
 # -----------------------------------------
 # RUN SERVER
