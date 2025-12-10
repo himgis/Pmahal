@@ -40,8 +40,8 @@ DEFAULT_LAYER_ORDER = ["P_Location", "Taluka"]
 # GITHUB SHAPEFILES (raw URLs)
 # -----------------------------------------
 GITHUB_SHAPEFILES = {
-    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/MyTaluka.zip",
-    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/MYP_Location.zip"
+    "Taluka": "https://github.com/himgis/webgis/raw/master/uploads/Taluka.zip",
+    "P_Location": "https://github.com/himgis/webgis/raw/master/uploads/P_Location.zip"
 }
 
 # -----------------------------------------
