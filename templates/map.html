@@ -8,11 +8,9 @@
     <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.81.1/dist/L.Control.Locate.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.81.1/dist/L.Control.Locate.min.css"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
-
     <style>
         body, html { margin:0; padding:0; height:100% }
         #map { width:100%; height:100vh; position:relative }
-
         /* ADMIN MENU */
         #adminMenu {
             position:absolute;
@@ -38,29 +36,25 @@
             font-size:14px;
             cursor:pointer;
         }
-
         .style-panel {
             position:absolute; top:10px; right:10px; background:white; padding:15px;
             border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.3);
             z-index:1000; width:280px; font-family:Roboto,sans-serif;
         }
-
         .layer-panel {
             position:absolute; bottom:10px; left:10px; background:white; padding:12px;
             border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.3);
             z-index:1000; width:260px; max-height:70vh;
             overflow-y:auto; font-family:Roboto,sans-serif; font-size:14px;
         }
-
         .panel h3 { margin:0 0 10px 0; background:#4285f4; color:white; padding:8px 12px; border-radius:5px; font-size:15px }
         .slider { margin:12px 0 }
         label { display:block; margin-bottom:5px; font-weight:bold; font-size:14px }
         input[type=range]{ width:100% }
         .val { font-size:12px; text-align:right; margin-top:3px; color:#555 }
-
         .layer-item {
-            padding:8px 5px; border-bottom:1px solid #eee; 
-            display:flex; align-items:center; 
+            padding:8px 5px; border-bottom:1px solid #eee;
+            display:flex; align-items:center;
             justify-content:space-between;
             user-select:none;
         }
@@ -74,15 +68,12 @@
     </style>
 </head>
 <body>
-
 <!-- ADMIN MENU -->
 <div id="adminMenu">
     <a href="/upload_page">Upload Shapefile</a>
     <button onclick="logout()">Logout</button>
 </div>
-
 <div id="map"></div>
-
 <!-- Style Panel -->
 <div class="panel style-panel">
     <h3>Layer Style</h3>
@@ -99,7 +90,6 @@
         <input type="range" id="radius" min="4" max="20" value="8">
     </div>
 </div>
-
 <!-- Layers Panel -->
 <div class="panel layer-panel">
     <h3>Layers</h3>
@@ -107,13 +97,11 @@
         <em>Loading layers...</em>
     </div>
 </div>
-
 <script>
 const map = L.map('map').setView([22.5, 73.0], 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
 }).addTo(map);
-
 L.control.locate({
     position: 'topleft',
     icon: 'fa fa-location-crosshairs fa-2x',
@@ -124,9 +112,9 @@ L.control.locate({
 function logout() { fetch("/logout").then(() => location.reload()); }
 
 let firstLoad = true;
-let allLayers = {};      // name -> L.GeoJSON
-let layerOrder = [];     // array of layer names in desired order (top to bottom or bottom-to-top depending how you add)
-let layerVisibility = {}; // name -> boolean
+let allLayers = {};          // name -> L.GeoJSON layer
+let layerOrder = [];         // array of layer names in display order
+let layerVisibility = {};    // name -> boolean
 let isAdmin = false;
 
 const styleConfig = { weight: 3, fillOpacity: 0.05, radius: 8 };
@@ -140,7 +128,7 @@ function updateDisplays() {
 function applyGlobalStyle() {
     Object.values(allLayers).forEach(layer => {
         layer.eachLayer(l => {
-            const c = l.feature.properties._color;
+            const c = l.feature.properties._color || '#3388ff';
             const st = { color: c, fillColor: c, weight: styleConfig.weight, fillOpacity: styleConfig.fillOpacity };
             if (l.setStyle) l.setStyle(st);
             if (l.setRadius) l.setRadius(styleConfig.radius);
@@ -160,63 +148,82 @@ async function loadLayers() {
     try {
         const res = await fetch('/layers');
         const data = await res.json();
-
         isAdmin = data.is_admin;
         document.getElementById("adminMenu").style.display = isAdmin ? "block" : "none";
 
-        // server order (explicit)
+        // Server-provided order (source of truth when available)
         const serverOrder = Array.isArray(data.order) ? data.order.slice() : Object.keys(data.layers);
-
-        // update layerOrder: keep server order, append any new ones
-        // if there is a saved server order it will be used as source of truth
         layerOrder = serverOrder.slice();
+
+        // Append any new layers not in server order
         for (const name of Object.keys(data.layers)) {
             if (!layerOrder.includes(name)) layerOrder.push(name);
         }
 
-        // remove layers that disappeared
-        layerOrder = layerOrder.filter(n => Object.keys(data.layers).includes(n));
+        let needsFitBounds = firstLoad && Object.keys(data.layers).length > 0;
 
-        // ensure allLayers contains created Leaflet layers
+        // Process each layer from server
         for (const [name, info] of Object.entries(data.layers)) {
-            if (!allLayers[name]) {
-                const geojson = info.geojson;
-                const color = info.color;
+            const geojson = info.geojson;
+            const color = info.color || '#3388ff';
 
-                geojson.features.forEach(f => {
-                    if (!f.properties) f.properties = {};
-                    f.properties._color = color;
-                });
-
-                const layer = L.geoJSON(geojson, {
-                    style: () => ({ color, weight: styleConfig.weight, fillColor: color, fillOpacity: styleConfig.fillOpacity }),
-                    pointToLayer: (f, latlng) =>
-                        L.circleMarker(latlng, { radius: styleConfig.radius, color, fillColor: color, fillOpacity: styleConfig.fillOpacity, weight: styleConfig.weight }),
-                    onEachFeature: (f, l) => {
-                        let html = '<table style="font-size:13px;width:100%">';
-                        for (const [k,v] of Object.entries(f.properties)) {
-                            if (k !== '_color')
-                                html += `<tr><td style="font-weight:bold;padding:4px">${k}</td><td style="padding:4px">${v??''}</td></tr>`;
-                        }
-                        html += '</table>';
-                        l.bindPopup(html);
-                    }
-                });
-
-                allLayers[name] = layer;
-                // default visibility true unless explicitly set false
-                if (layerVisibility[name] === undefined) layerVisibility[name] = true;
+            // If layer already exists, optionally update color if changed
+            if (allLayers[name]) {
+                const layer = allLayers[name];
+                if (layer.options.color !== color) {
+                    layer.options.color = color;
+                    layer.options.fillColor = color;
+                    layer.eachLayer(l => {
+                        if (l.feature.properties) l.feature.properties._color = color;
+                        const st = { color, fillColor: color };
+                        if (l.setStyle) l.setStyle(st);
+                    });
+                }
+                continue; // keep existing layer → popups stay open
             }
+
+            // Create new GeoJSON layer
+            geojson.features.forEach(f => {
+                if (!f.properties) f.properties = {};
+                f.properties._color = color;
+            });
+
+            const layer = L.geoJSON(geojson, {
+                style: () => ({
+                    color, fillColor: color,
+                    weight: styleConfig.weight,
+                    fillOpacity: styleConfig.fillOpacity
+                }),
+                pointToLayer: (f, latlng) =>
+                    L.circleMarker(latlng, {
+                        radius: styleConfig.radius,
+                        color, fillColor: color,
+                        fillOpacity: styleConfig.fillOpacity,
+                        weight: styleConfig.weight
+                    }),
+                onEachFeature: (f, l) => {
+                    let html = '<table style="font-size:13px;width:100%">';
+                    for (const [k, v] of Object.entries(f.properties || {})) {
+                        if (k !== '_color')
+                            html += `<tr><td style="font-weight:bold;padding:4px">${k}</td><td style="padding:4px">${v??''}</td></tr>`;
+                    }
+                    html += '</table>';
+                    l.bindPopup(html, { maxWidth: 400 });
+                }
+            });
+
+            allLayers[name] = layer;
+            layerVisibility[name] = layerVisibility[name] ?? true;
         }
 
         renderLayersOnMap();
         updateLayerCheckboxUI();
 
-        // fit bounds on first load or when layers added
-        if ((firstLoad) && Object.values(allLayers).length > 0) {
-            const b = L.latLngBounds([]);
-            Object.values(allLayers).forEach(l => { try { b.extend(l.getBounds()); } catch {} });
-            if (b.isValid()) map.fitBounds(b);
+        if (needsFitBounds) {
+            const group = new L.featureGroup(Object.values(allLayers));
+            if (group.getLayers().length > 0) {
+                map.fitBounds(group.getBounds().pad(0.1));
+            }
         }
 
         firstLoad = false;
@@ -225,34 +232,44 @@ async function loadLayers() {
     }
 }
 
+// Smart rendering: only add/remove as needed, never destroy existing layers
 function renderLayersOnMap() {
-    // remove existing GeoJSON layers
-    map.eachLayer(l => {
-        if (l instanceof L.GeoJSON) map.removeLayer(l);
-    });
-
-    // add in the order of layerOrder
-    layerOrder.forEach(name => {
-        const lyr = allLayers[name];
-        if (!lyr) return;
-        if (layerVisibility[name] !== false) {
-            map.addLayer(lyr);
+    // Remove layers that no longer exist on server
+    for (const name in allLayers) {
+        if (!layerOrder.includes(name)) {
+            if (map.hasLayer(allLayers[name])) {
+                map.removeLayer(allLayers[name]);
+            }
+            delete allLayers[name];
+            delete layerVisibility[name];
         }
+    }
+
+    // Add/show or hide layers according to current order and visibility
+    layerOrder.forEach(name => {
+        const layer = allLayers[name];
+        if (!layer) return;
+
+        const shouldBeVisible = layerVisibility[name] !== false;
+
+        if (shouldBeVisible && !map.hasLayer(layer)) {
+            map.addLayer(layer);
+        } else if (!shouldBeVisible && map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+        // If already in correct state → do nothing (popups stay alive!)
     });
 }
 
 function updateLayerCheckboxUI() {
     const div = document.getElementById("layerList");
     div.innerHTML = "";
-
     if (layerOrder.length === 0) {
         div.innerHTML = "<em>No layers</em>";
         return;
     }
-
     layerOrder.forEach((name, index) => {
         const visible = layerVisibility[name] !== false;
-
         const row = document.createElement("div");
         row.className = "layer-item";
 
@@ -264,10 +281,8 @@ function updateLayerCheckboxUI() {
             layerVisibility[name] = cb.checked;
             renderLayersOnMap();
         };
-
         const label = document.createElement("label");
         label.textContent = name;
-
         left.appendChild(cb);
         left.appendChild(label);
         row.appendChild(left);
@@ -276,14 +291,14 @@ function updateLayerCheckboxUI() {
             const controls = document.createElement("span");
 
             const up = document.createElement("span");
-            up.textContent = "⬆️";
+            up.textContent = "⬆";
             up.style.cursor = "pointer";
             up.style.marginLeft = "8px";
             up.onclick = () => moveLayer(name, -1);
             controls.appendChild(up);
 
             const down = document.createElement("span");
-            down.textContent = "⬇️";
+            down.textContent = "⬇";
             down.style.cursor = "pointer";
             down.style.marginLeft = "8px";
             down.onclick = () => moveLayer(name, 1);
@@ -291,14 +306,13 @@ function updateLayerCheckboxUI() {
 
             const del = document.createElement("span");
             del.className = "delete-btn";
-            del.textContent = "🗑️";
+            del.textContent = "🗑";
             del.style.marginLeft = "8px";
             del.onclick = () => deleteLayer(name);
             controls.appendChild(del);
 
             row.appendChild(controls);
         }
-
         div.appendChild(row);
     });
 }
@@ -309,15 +323,8 @@ async function deleteLayer(name) {
         const res = await fetch(`/delete/${encodeURIComponent(name)}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.message) {
-            if (allLayers[name]) {
-                try { map.removeLayer(allLayers[name]); } catch {}
-                delete allLayers[name];
-            }
-            // remove from order and save to server if admin
-            layerOrder = layerOrder.filter(n => n !== name);
-            if (isAdmin) await saveOrderToServer();
-            renderLayersOnMap();
-            updateLayerCheckboxUI();
+            // Will be cleaned up automatically on next loadLayers()
+            await loadLayers();
         } else {
             alert(data.error || "Failed to delete");
         }
@@ -333,11 +340,9 @@ async function moveLayer(name, direction) {
     if (newIdx < 0 || newIdx >= layerOrder.length) return;
 
     [layerOrder[idx], layerOrder[newIdx]] = [layerOrder[newIdx], layerOrder[idx]];
-
     renderLayersOnMap();
     updateLayerCheckboxUI();
 
-    // persist order to server (admin only)
     if (isAdmin) {
         await saveOrderToServer();
     }
@@ -355,7 +360,7 @@ async function saveOrderToServer() {
     }
 }
 
-// auto-refresh layers but preserve order
+// Initial load and periodic refresh (now safe for open popups)
 loadLayers();
 setInterval(loadLayers, 3000);
 </script>
