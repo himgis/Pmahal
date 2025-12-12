@@ -121,7 +121,7 @@ const styleConfig = { weight: 3, fillOpacity: 0.05, radius: 8 };
 
 function updateDisplays() {
     document.getElementById('wVal').textContent = styleConfig.weight;
-    document.getElementById('oVal').textContent = styleConfig.fillOpacity.toFixed(2);
+    document.getElementById('oVal').textContent = styleConfig.fillOpacity.to these.toFixed(2);
     document.getElementById('rVal').textContent = styleConfig.radius;
 }
 
@@ -167,7 +167,7 @@ async function loadLayers() {
             const geojson = info.geojson;
             const color = info.color || '#3388ff';
 
-            // If layer already exists, optionally update color if changed
+            // If layer already exists, update color if changed
             if (allLayers[name]) {
                 const layer = allLayers[name];
                 if (layer.options.color !== color) {
@@ -232,7 +232,7 @@ async function loadLayers() {
     }
 }
 
-// Smart rendering: only add/remove as needed, never destroy existing layers
+// Smart rendering: only add/remove as needed
 function renderLayersOnMap() {
     // Remove layers that no longer exist on server
     for (const name in allLayers) {
@@ -245,7 +245,7 @@ function renderLayersOnMap() {
         }
     }
 
-    // Add/show or hide layers according to current order and visibility
+    // Add/show or hide layers according to order and visibility
     layerOrder.forEach(name => {
         const layer = allLayers[name];
         if (!layer) return;
@@ -257,7 +257,6 @@ function renderLayersOnMap() {
         } else if (!shouldBeVisible && map.hasLayer(layer)) {
             map.removeLayer(layer);
         }
-        // If already in correct state → do nothing (popups stay alive!)
     });
 }
 
@@ -291,14 +290,14 @@ function updateLayerCheckboxUI() {
             const controls = document.createElement("span");
 
             const up = document.createElement("span");
-            up.textContent = "⬆";
+            up.textContent = "⬆️";
             up.style.cursor = "pointer";
             up.style.marginLeft = "8px";
             up.onclick = () => moveLayer(name, -1);
             controls.appendChild(up);
 
             const down = document.createElement("span");
-            down.textContent = "⬇";
+            down.textContent = "⬇️";
             down.style.cursor = "pointer";
             down.style.marginLeft = "8px";
             down.onclick = () => moveLayer(name, 1);
@@ -306,7 +305,7 @@ function updateLayerCheckboxUI() {
 
             const del = document.createElement("span");
             del.className = "delete-btn";
-            del.textContent = "🗑";
+            del.textContent = "🗑️";
             del.style.marginLeft = "8px";
             del.onclick = () => deleteLayer(name);
             controls.appendChild(del);
@@ -323,7 +322,6 @@ async function deleteLayer(name) {
         const res = await fetch(`/delete/${encodeURIComponent(name)}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.message) {
-            // Will be cleaned up automatically on next loadLayers()
             await loadLayers();
         } else {
             alert(data.error || "Failed to delete");
@@ -360,7 +358,7 @@ async function saveOrderToServer() {
     }
 }
 
-// Initial load and periodic refresh (now safe for open popups)
+// Initial load and periodic refresh
 loadLayers();
 setInterval(loadLayers, 3000);
 </script>
